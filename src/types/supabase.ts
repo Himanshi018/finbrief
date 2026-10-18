@@ -48,10 +48,12 @@ export interface Database {
           id: string;
           external_id: string;
           title: string;
+          simple_title: string | null;
           url: string;
           description: string | null;
           summary: string | null;
           why_it_matters: string | null;
+          key_terms: { term: string; explanation: string }[] | null;
           image_url: string | null;
           category_id: string | null;
           source_id: string | null;
@@ -62,10 +64,12 @@ export interface Database {
           id?: string;
           external_id: string;
           title: string;
+          simple_title?: string | null;
           url: string;
           description?: string | null;
           summary?: string | null;
           why_it_matters?: string | null;
+          key_terms?: { term: string; explanation: string }[] | null;
           image_url?: string | null;
           category_id?: string | null;
           source_id?: string | null;

@@ -30,6 +30,8 @@ export interface Article {
   id: string;
   external_id: string;
   title: string;
+  /** Plain-English headline from the AI step; null until generated (fall back to `title`). */
+  simple_title: string | null;
   url: string;
   description: string | null;
   summary: string | null;

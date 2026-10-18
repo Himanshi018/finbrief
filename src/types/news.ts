@@ -27,6 +27,8 @@ export interface RawNewsItem {
   sourceName: string;
   sourceDomain: string | null;
   categorySlug: CategorySlug;
+  /** India-relevant (Indian outlet or RBI/SEBI/Sensex/rupee/...): ranked ahead when picking a batch. */
+  india?: boolean;
 }
 
 export interface ArticlesPageResponse {

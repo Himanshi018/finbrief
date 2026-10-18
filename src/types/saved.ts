@@ -1,8 +1,11 @@
-import type { ArticleWithRelations, CategorySlug } from "@/types/database";
+import type { ArticleWithRelations, CategorySlug, KeyTerm } from "@/types/database";
 
 export interface SavedArticleSnapshot {
   id: string;
   title: string;
+  // Optional: snapshots saved before these fields existed lack them
+  simple_title?: string | null;
+  key_terms?: KeyTerm[] | null;
   url: string;
   summary: string | null;
   why_it_matters: string | null;
@@ -19,6 +22,8 @@ export function articleToSnapshot(article: ArticleWithRelations): SavedArticleSn
   return {
     id: article.id,
     title: article.title,
+    simple_title: article.simple_title,
+    key_terms: article.key_terms,
     url: article.url,
     summary: article.summary,
     why_it_matters: article.why_it_matters,
@@ -37,11 +42,12 @@ export function snapshotToArticle(snapshot: SavedArticleSnapshot): ArticleWithRe
     id: snapshot.id,
     external_id: snapshot.id,
     title: snapshot.title,
+    simple_title: snapshot.simple_title ?? null,
     url: snapshot.url,
     description: snapshot.description,
     summary: snapshot.summary,
     why_it_matters: snapshot.why_it_matters,
-    key_terms: null,
+    key_terms: snapshot.key_terms ?? null,
     image_url: snapshot.image_url,
     category_id: null,
     source_id: null,

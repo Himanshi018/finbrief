@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "ingest": "tsx --experimental-websocket scripts/ingest.ts",
-    "backfill-ai": "tsx --experimental-websocket scripts/backfill-ai.ts"
+    "backfill-ai": "tsx --experimental-websocket scripts/backfill-ai.ts",
+    "cleanup-articles": "tsx --experimental-websocket scripts/cleanup-articles.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

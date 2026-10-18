@@ -1,6 +1,68 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/layout/SiteHeader";
+import { NewsCard } from "@/components/feed/NewsCard";
 import { APP_TAGLINE } from "@/lib/constants/categories";
+import type { ArticleWithRelations } from "@/types/database";
+
+/**
+ * Shown only when the database has no complete brief yet (fresh setup), so the
+ * landing page always demonstrates the format. Text is real output from the
+ * AI step for this story.
+ */
+const SAMPLE_BRIEF: ArticleWithRelations = {
+  id: "sample",
+  external_id: "sample",
+  title: "ICICI Bank Q2 profit jumps 20% as net interest margins narrow",
+  simple_title: "ICICI Bank's quarterly profit rises 20% despite thinner lending margins",
+  url: "/feed",
+  description: null,
+  summary:
+    "ICICI Bank's Q2 profit rose 20% even though its net interest margin narrowed as higher deposit costs squeezed earnings, showing the bank can still grow profit when lending spreads tighten.",
+  why_it_matters:
+    "Higher deposit costs can push banks to raise loan rates, affecting borrowing costs for households and businesses. Profit growth despite margin pressure signals a resilient bank, which supports credit availability.",
+  key_terms: [
+    {
+      term: "Net interest margin",
+      explanation:
+        "The gap between the interest a bank earns on loans and pays on deposits, as a share of its assets.",
+    },
+    {
+      term: "Deposit costs",
+      explanation: "The interest a bank must pay to attract and keep customers' savings.",
+    },
+    {
+      term: "Quarterly profit",
+      explanation: "What a company earned over three months, used to judge short-term performance.",
+    },
+  ],
+  image_url: null,
+  category_id: null,
+  source_id: null,
+  published_at: new Date().toISOString(),
+  created_at: new Date().toISOString(),
+  category: { slug: "markets", name: "Markets" },
+  source: { name: "Example" },
+};
+
+export function ExampleBriefSection({ article }: { article: ArticleWithRelations | null }) {
+  return (
+    <section aria-labelledby="example-heading" className="mx-auto max-w-3xl px-4 pt-10 sm:px-6 sm:pt-14">
+      <h2 id="example-heading" className="text-2xl font-semibold text-slate-900">
+        Every story, explained like this
+      </h2>
+      <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-600">
+        A plain-English headline, the gist in under a minute, why it matters to you, and the
+        jargon decoded. Tap a term to see what it means.
+      </p>
+      <div className="mt-6">
+        {article ? <NewsCard article={article} /> : <NewsCard article={SAMPLE_BRIEF} preview />}
+      </div>
+      <p className="mt-3 text-center text-xs text-slate-500">
+        {article ? "Latest brief from today's feed" : "Example brief"}
+      </p>
+    </section>
+  );
+}
 
 export function HeroSection() {
   return (
@@ -48,8 +110,8 @@ export function FeaturesSection() {
       body: "Markets, startups, economy, fintech, AI business, and global finance — curated for relevance.",
     },
     {
-      title: "Plain-language summaries",
-      body: "Each story is condensed to about 60 words with jargon explained so you can stay informed confidently.",
+      title: "Why it matters, every time",
+      body: "Each story gets a plain-English headline, a summary under 45 words, and a clear note on how it affects your money, job or daily life.",
     },
     {
       title: "Save on this device",

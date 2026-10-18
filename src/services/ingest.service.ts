@@ -1,6 +1,8 @@
-import { fetchAllCategoryNews } from "@/lib/newsapi/client";
+import { fetchAllCategoryNews, type FilterDecision } from "@/lib/newsapi/client";
+import { CATEGORY_DEFINITIONS, INDIA_BOOST_HOURS } from "@/lib/constants/categories";
 import {
   AiUnavailableError,
+  checkFinanceRelevance,
   generateArticleInsights,
   type ArticleInsights,
 } from "@/lib/ai/summarize";
@@ -11,6 +13,12 @@ import type { RawNewsItem } from "@/types/news";
 export const DEFAULT_INGEST_ARTICLES = 10;
 /** Hard cap on articles per run (ingest or backfill): each one costs an AI call. */
 export const MAX_INGEST_ARTICLES = 50;
+/**
+ * AI calls per ingest run, as a multiple of maxArticles. Stories the relevance
+ * gate rejects don't count toward maxArticles, so this bounds the spend when
+ * many candidates turn out not to be finance.
+ */
+const AI_CALLS_PER_ARTICLE_BUDGET = 3;
 
 export interface IngestOptions {
   maxArticles?: number;
@@ -26,6 +34,12 @@ export interface IngestResult {
   inserted: number;
   /** Already in the database. */
   skipped: number;
+  /** Rejected earlier by the relevance gate or cleanup (article_rejections); no AI call spent. */
+  previouslyRejected: number;
+  /** Not stored: the AI relevance gate said the story isn't finance. */
+  rejectedByAi: number;
+  /** "title: reason" for each AI rejection in this run. */
+  aiRejections: string[];
   /**
    * Inserted without all three AI fields. They stay hidden from the feed
    * until `npm run backfill-ai` fills them in.
@@ -36,8 +50,25 @@ export interface IngestResult {
   durationMs: number;
   /** Titles that would be inserted (dry run only). */
   candidates?: string[];
+  /** Every filter accept/reject with its reason (dry run only). */
+  decisions?: FilterDecision[];
   warnings: string[];
   errors: string[];
+}
+
+/** Rank key: publish time, with India-relevant stories counted as fresher. */
+function rankTime(item: RawNewsItem): number {
+  return new Date(item.publishedAt).getTime() + (item.india ? INDIA_BOOST_HOURS * 3_600_000 : 0);
+}
+
+/** Warn when a category slug in code has no row in the categories table. */
+async function findMissingCategorySlugs(): Promise<string[]> {
+  const { data, error } = await createAdminClient().from("categories").select("slug");
+  if (error) return [`could not read categories table: ${error.message}`];
+  const slugs = new Set((data ?? []).map((row) => row.slug as string));
+  return CATEGORY_DEFINITIONS.filter((def) => !slugs.has(def.slug)).map(
+    (def) => `category "${def.slug}" is missing from the categories table; its articles will fail to insert`,
+  );
 }
 
 export class IngestionInProgressError extends Error {
@@ -114,30 +145,97 @@ function isComplete(insights: ArticleInsights | null): boolean {
 }
 
 /**
- * Wraps generateArticleInsights with per-run fail-fast: after the first
+ * Wraps the AI calls with per-run fail-fast: after the first
  * AiUnavailableError (bad key, no credits, unknown model, ...) it logs one
  * message and returns null for every later call instead of retrying.
  */
-function createAiStep() {
+export function createAiStep() {
   const aiEnabled = Boolean(process.env.OPENAI_API_KEY);
   let stopped: string | null = null;
+  let calls = 0;
 
+  async function guard<T>(call: () => Promise<T | null>): Promise<T | null> {
+    if (!aiEnabled || stopped) return null;
+    calls += 1;
+    try {
+      return await call();
+    } catch (err) {
+      if (!(err instanceof AiUnavailableError)) throw err;
+      stopped = `${err.reason}: ${err.message}`;
+      log(`  ! AI stopped for the rest of this run (${stopped})`);
+      return null;
+    }
+  }
+
+  type Input = { title: string; description: string | null };
   return {
     aiEnabled,
     /** One-line reason AI was switched off for this run, if it was. */
     get stopped() {
       return stopped;
     },
-    async generate(input: { title: string; description: string | null }) {
-      if (!aiEnabled || stopped) return null;
-      try {
-        return await generateArticleInsights(input);
-      } catch (err) {
-        if (!(err instanceof AiUnavailableError)) throw err;
-        stopped = `${err.reason}: ${err.message}`;
-        log(`  ! AI stopped for the rest of this run (${stopped})`);
-        return null;
+    /** Requests actually sent to the provider this run. */
+    get calls() {
+      return calls;
+    },
+    generate: (input: Input) => guard(() => generateArticleInsights(input)),
+    checkRelevance: (input: Input) => guard(() => checkFinanceRelevance(input)),
+  };
+}
+
+export interface RejectionRecord {
+  external_id: string;
+  title: string;
+  reason: string;
+}
+
+/**
+ * Stories rejected by the relevance gate or cleanup (table from migration
+ * 004). If the table doesn't exist yet this degrades to a no-op with one
+ * warning, so ingestion keeps working before the migration is run.
+ */
+export function createRejectionStore(warnings: string[]) {
+  const supabase = createAdminClient();
+  let available = true;
+
+  const handle = (error: { code?: string; message: string }) => {
+    const missing =
+      error.code === "42P01" || error.code === "PGRST205" || /article_rejections/.test(error.message);
+    if (!missing) throw new Error(error.message);
+    if (available) {
+      available = false;
+      warnings.push(
+        "article_rejections table is missing, so rejected stories will be re-checked with AI on every run. Run supabase/migrations/004_article_rejections.sql in the Supabase SQL editor.",
+      );
+    }
+  };
+
+  return {
+    async has(externalId: string): Promise<boolean> {
+      if (!available) return false;
+      const { data, error } = await supabase
+        .from("article_rejections")
+        .select("external_id")
+        .eq("external_id", externalId)
+        .maybeSingle();
+      if (error) {
+        handle(error);
+        return false;
       }
+      return Boolean(data);
+    },
+    /** Returns false if the records couldn't be stored (table missing). */
+    async add(records: RejectionRecord[]): Promise<boolean> {
+      if (records.length === 0) return true;
+      if (!available) return false;
+      const { error } = await supabase
+        .from("article_rejections")
+        .upsert(records, { onConflict: "external_id" });
+      if (error) {
+        handle(error);
+        return false;
+      }
+      return true;
     },
   };
 }
@@ -155,6 +253,8 @@ async function insertArticle(item: RawNewsItem, insights: ArticleInsights | null
     url: item.url,
     description: item.description,
     // null = not generated yet; the feed hides these until backfilled
+    // (simple_title is optional: the UI falls back to the original title)
+    simple_title: insights?.simpleTitle ?? null,
     summary: insights?.summary ?? null,
     why_it_matters: insights?.whyItMatters ?? null,
     key_terms: insights?.keyTerms ?? null,
@@ -166,9 +266,16 @@ async function insertArticle(item: RawNewsItem, insights: ArticleInsights | null
 
   if (error) {
     if (error.code === "23505") return false;
-    throw new Error(error.message);
+    throw new Error(withMigrationHint(error.message));
   }
   return true;
+}
+
+/** Point at the migration when the DB predates the simple_title column. */
+function withMigrationHint(message: string): string {
+  return /simple_title/.test(message)
+    ? `${message}. Run supabase/migrations/003_article_simple_title.sql in the Supabase SQL editor.`
+    : message;
 }
 
 // Guards against overlapping runs within one server process (double-clicks,
@@ -199,6 +306,9 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     fetched: 0,
     inserted: 0,
     skipped: 0,
+    previouslyRejected: 0,
+    rejectedByAi: 0,
+    aiRejections: [],
     aiFailures: 0,
     durationMs: 0,
     aiStopped: null,
@@ -206,6 +316,8 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     errors: [],
   };
   if (dryRun) result.candidates = [];
+  const rejections = createRejectionStore(result.warnings);
+  const maxAiCalls = maxArticles * AI_CALLS_PER_ARTICLE_BUDGET;
 
   if (
     typeof options?.maxArticles === "number" &&
@@ -237,9 +349,14 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     return result;
   };
 
+  if (dryRun) {
+    result.decisions = [];
+    result.warnings.push(...(await findMissingCategorySlugs()));
+  }
+
   let items: RawNewsItem[];
   try {
-    items = await fetchAllCategoryNews();
+    items = await fetchAllCategoryNews(dryRun ? (d) => result.decisions!.push(d) : undefined);
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : "News fetch failed");
     return finish();
@@ -254,6 +371,7 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
   // Round-robin across categories (each newest-first) instead of one global
   // newest-first list: busy queries like markets would otherwise fill every
   // run and slower ones like global-finance would never make the cut.
+  // Within a category, India-relevant stories rank as INDIA_BOOST_HOURS fresher.
   const byCategory = new Map<string, RawNewsItem[]>();
   for (const item of items) {
     const list = byCategory.get(item.categorySlug) ?? [];
@@ -261,7 +379,7 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     byCategory.set(item.categorySlug, list);
   }
   const queues = [...byCategory.values()].map((list) =>
-    list.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()),
+    list.sort((a, b) => rankTime(b) - rankTime(a)),
   );
   const sorted: RawNewsItem[] = [];
   for (let i = 0; queues.some((q) => i < q.length); i++) {
@@ -277,16 +395,36 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
         result.skipped += 1;
         continue;
       }
+      if (await rejections.has(item.externalId)) {
+        result.previouslyRejected += 1;
+        continue;
+      }
 
       if (dryRun) {
-        result.candidates!.push(`[${item.categorySlug}] ${item.title}`);
+        result.candidates!.push(`[${item.categorySlug}]${item.india ? " (India)" : ""} ${item.title}`);
         processed += 1;
         continue;
       }
 
       // Insert even when AI fails: NewsAPI won't return this story again
       // once it ages out, and the feed hides it until it's backfilled.
+      if (ai.calls >= maxAiCalls) {
+        result.warnings.push(
+          `Stopped after ${ai.calls} AI calls (budget for --max ${maxArticles}); many candidates were not finance`,
+        );
+        break;
+      }
       const insights = await ai.generate({ title: item.title, description: item.description });
+
+      // Relevance gate: don't store stories the AI says aren't finance
+      if (insights?.isFinanceRelevant === false) {
+        const reason = insights.relevanceReason ?? "not finance";
+        result.rejectedByAi += 1;
+        result.aiRejections.push(`${item.title}: ${reason}`);
+        log(`  - not finance [${item.categorySlug}] ${item.title.slice(0, 70)} (${reason})`);
+        await rejections.add([{ external_id: item.externalId, title: item.title, reason: `AI gate: ${reason}` }]);
+        continue;
+      }
       const aiFailed = !isComplete(insights);
 
       const inserted = await insertArticle(item, insights);
@@ -334,6 +472,8 @@ export interface BackfillResult {
   /** Got a reply but some fields were still missing; left for the next run. */
   incomplete: number;
   failed: number;
+  /** The relevance gate said "not finance"; left for `npm run cleanup-articles`. */
+  notRelevant: number;
   aiStopped: string | null;
   durationMs: number;
   candidates?: string[];
@@ -341,7 +481,17 @@ export interface BackfillResult {
   errors: string[];
 }
 
-const MISSING_AI_FILTER = "summary.is.null,why_it_matters.is.null,key_terms.is.null";
+const MISSING_AI_FILTER =
+  "simple_title.is.null,summary.is.null,why_it_matters.is.null,key_terms.is.null";
+
+interface BackfillRow {
+  id: string;
+  title: string;
+  description: string | null;
+  summary: string | null;
+  why_it_matters: string | null;
+  key_terms: unknown;
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -361,6 +511,7 @@ export async function runAiBackfill(options?: BackfillOptions): Promise<Backfill
     updated: 0,
     incomplete: 0,
     failed: 0,
+    notRelevant: 0,
     aiStopped: null,
     durationMs: 0,
     warnings,
@@ -376,6 +527,9 @@ export async function runAiBackfill(options?: BackfillOptions): Promise<Backfill
       : `Backfilled ${result.updated} article(s)` +
         (result.incomplete ? `, ${result.incomplete} still incomplete` : "") +
         (result.failed ? `, ${result.failed} failed` : "") +
+        (result.notRelevant
+          ? `, ${result.notRelevant} not finance (run npm run cleanup-articles to remove)`
+          : "") +
         `; ${Math.max(0, result.pending - result.updated)} still pending, in ${secs}s` +
         (result.aiStopped ? `. AI stopped early (${result.aiStopped})` : "");
     log(result.message);
@@ -390,17 +544,17 @@ export async function runAiBackfill(options?: BackfillOptions): Promise<Backfill
 
   const { data, count, error } = await supabase
     .from("articles")
-    .select("id,title,description", { count: "exact" })
+    .select("id,title,description,summary,why_it_matters,key_terms", { count: "exact" })
     .or(MISSING_AI_FILTER)
     .order("published_at", { ascending: false })
     .limit(maxArticles);
 
   if (error) {
-    result.errors.push(error.message);
+    result.errors.push(withMigrationHint(error.message));
     return finish();
   }
 
-  const rows = (data ?? []) as { id: string; title: string; description: string | null }[];
+  const rows = (data ?? []) as BackfillRow[];
   result.pending = count ?? rows.length;
   log(`backfill: ${result.pending} article(s) missing AI fields; processing up to ${maxArticles}${dryRun ? " (dry run)" : ""}`);
 
@@ -419,26 +573,45 @@ export async function runAiBackfill(options?: BackfillOptions): Promise<Backfill
       log(`  ! ${i + 1}/${rows.length} no usable AI reply: ${row.title.slice(0, 70)}`);
       continue;
     }
-
-    // Overwrite all three: rows from before AI worked hold fallback summaries
-    const patch = {
-      ...(insights.summary && { summary: insights.summary }),
-      ...(insights.whyItMatters && { why_it_matters: insights.whyItMatters }),
-      ...(insights.keyTerms && { key_terms: insights.keyTerms }),
-    };
-    const { error: updateError } = await supabase.from("articles").update(patch).eq("id", row.id);
-    if (updateError) {
-      result.errors.push(`${row.title}: ${updateError.message}`);
-      log(`  ! ${i + 1}/${rows.length} update failed: ${updateError.message}`);
+    if (insights.isFinanceRelevant === false) {
+      result.notRelevant += 1;
+      log(
+        `  - ${i + 1}/${rows.length} not finance, left untouched (${insights.relevanceReason ?? "no reason"}): ${row.title.slice(0, 70)}`,
+      );
       continue;
     }
 
-    if (isComplete(insights)) {
+    // Rows already showing in the feed only need a simple_title; keep their
+    // reviewed text. Other rows get all fields overwritten, since rows from
+    // before AI worked hold fallback summaries.
+    const onlyTitle = Boolean(row.summary && row.why_it_matters && row.key_terms);
+    const patch = {
+      ...(insights.simpleTitle && { simple_title: insights.simpleTitle }),
+      ...(!onlyTitle && insights.summary && { summary: insights.summary }),
+      ...(!onlyTitle && insights.whyItMatters && { why_it_matters: insights.whyItMatters }),
+      ...(!onlyTitle && insights.keyTerms && { key_terms: insights.keyTerms }),
+    };
+    if (Object.keys(patch).length === 0) {
+      result.incomplete += 1;
+      log(`  ~ ${i + 1}/${rows.length} nothing usable in the reply: ${row.title.slice(0, 70)}`);
+      continue;
+    }
+    const { error: updateError } = await supabase.from("articles").update(patch).eq("id", row.id);
+    if (updateError) {
+      const message = withMigrationHint(updateError.message);
+      result.errors.push(`${row.title}: ${message}`);
+      log(`  ! ${i + 1}/${rows.length} update failed: ${message}`);
+      continue;
+    }
+
+    const visible = onlyTitle || isComplete(insights);
+    const noTitle = insights.simpleTitle ? "" : " (no usable simple title; showing original)";
+    if (visible && (insights.simpleTitle || !onlyTitle)) {
       result.updated += 1;
-      log(`  + ${i + 1}/${rows.length} ${row.title.slice(0, 70)}`);
+      log(`  + ${i + 1}/${rows.length} ${insights.simpleTitle ?? row.title.slice(0, 70)}${noTitle}`);
     } else {
       result.incomplete += 1;
-      log(`  ~ ${i + 1}/${rows.length} partial reply, still hidden: ${row.title.slice(0, 70)}`);
+      log(`  ~ ${i + 1}/${rows.length} partial reply${visible ? "" : ", still hidden"}: ${row.title.slice(0, 70)}${noTitle}`);
     }
   }
 
@@ -451,6 +624,8 @@ function summarize(r: IngestResult): string {
     return `Dry run: ${r.candidates?.length ?? 0} new article(s) would be inserted (fetched ${r.fetched}, ${r.skipped} already stored) in ${secs}s`;
   }
   const parts = [`Inserted ${r.inserted} new article(s)`, `fetched ${r.fetched}`, `${r.skipped} already stored`];
+  if (r.rejectedByAi) parts.push(`${r.rejectedByAi} rejected as not finance`);
+  if (r.previouslyRejected) parts.push(`${r.previouslyRejected} rejected earlier`);
   if (r.errors.length) parts.push(`${r.errors.length} error(s)`);
   const stopped = r.aiStopped ? `. AI stopped early (${r.aiStopped})` : "";
   return `${parts.join(", ")} in ${secs}s${stopped}`;

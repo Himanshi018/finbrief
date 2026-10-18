@@ -5,6 +5,7 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SaveArticleButton } from "@/components/feed/SaveArticleButton";
 import { ShareButtons } from "@/components/article/ShareButtons";
+import { WhyItMatters } from "@/components/article/WhyItMatters";
 import { getArticleById, listRelatedArticles } from "@/services/articles.service";
 import { formatPublishedDate } from "@/lib/utils/date";
 import { getSiteUrl } from "@/lib/seo/site-url";
@@ -18,18 +19,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const article = await getArticleById(id);
   if (!article) return {};
 
+  const title = article.simple_title?.trim() || article.title;
   const description = article.summary ?? article.description ?? undefined;
   return {
-    title: article.title,
+    title,
     description,
     openGraph: {
-      title: `${article.title} · ${APP_NAME}`,
+      title: `${title} · ${APP_NAME}`,
       description,
       images: article.image_url ? [{ url: article.image_url }] : [],
     },
     twitter: {
       card: "summary_large_image",
-      title: article.title,
+      title,
       description,
     },
   };
@@ -50,6 +52,8 @@ export default async function ArticlePage({ params }: Props) {
     article.summary?.trim() ||
     article.description?.trim() ||
     "No summary available.";
+  const headline = article.simple_title?.trim() || article.title;
+  const hasSimpleTitle = headline !== article.title;
   const categoryName = article.category?.name ?? "Finance";
   const sourceName = article.source?.name ?? "Source";
   const articleUrl = `${getSiteUrl()}/articles/${article.id}`;
@@ -119,13 +123,29 @@ export default async function ArticlePage({ params }: Props) {
 
           {/* Headline */}
           <h1 className="mt-3 text-2xl font-bold leading-snug tracking-tight text-slate-900 sm:text-3xl sm:leading-tight">
-            {article.title}
+            {headline}
           </h1>
+
+          {/* The publisher's own headline, for transparency */}
+          {hasSimpleTitle ? (
+            <p className="mt-3 text-sm leading-relaxed text-slate-500">
+              <span className="font-semibold text-slate-600">Original headline:</span>{" "}
+              <a
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-slate-300 underline-offset-2 transition-colors hover:text-emerald-800 hover:decoration-emerald-400"
+              >
+                {article.title}
+              </a>{" "}
+              <span className="whitespace-nowrap">({sourceName})</span>
+            </p>
+          ) : null}
 
           {/* Action bar */}
           <div className="mt-4 flex items-center gap-2">
             <SaveArticleButton article={article} />
-            <ShareButtons title={article.title} url={articleUrl} />
+            <ShareButtons title={headline} url={articleUrl} />
           </div>
 
           <hr className="my-7 border-slate-100" />
@@ -143,66 +163,38 @@ export default async function ArticlePage({ params }: Props) {
             </p>
           </section>
 
-          {/* Why It Matters */}
+          {/* Why It Matters: directly after the summary, same block as the feed card */}
           {article.why_it_matters ? (
+            <WhyItMatters text={article.why_it_matters} size="page" as="h2" className="mt-6" />
+          ) : null}
+
+          {/* Terms explained */}
+          {keyTerms && keyTerms.length > 0 ? (
             <>
               <hr className="my-7 border-slate-100" />
-              <section aria-labelledby="why-heading">
-                <div className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-50/30 p-5 sm:p-6">
-                  {/* decorative circle */}
-                  <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-100/60" aria-hidden />
-                  <h2
-                    id="why-heading"
-                    className="relative flex items-center gap-2 text-sm font-bold text-emerald-900"
-                  >
-                    <span
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-200/80 text-base shadow-sm"
-                      aria-hidden
+              <section aria-labelledby="terms-heading">
+                <h2 id="terms-heading" className="text-base font-bold text-slate-900">
+                  Terms explained
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  The jargon in this story, in plain English.
+                </p>
+                <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {keyTerms.map(({ term, explanation }) => (
+                    <div
+                      key={term}
+                      className="rounded-xl border border-slate-200 bg-slate-50/60 p-4"
                     >
-                      💡
-                    </span>
-                    Why It Matters
-                  </h2>
-                  <p className="relative mt-3 text-[0.95rem] leading-7 text-emerald-950/80 sm:leading-8">
-                    {article.why_it_matters}
-                  </p>
-                </div>
+                      <dt className="text-sm font-bold text-emerald-800">{term}</dt>
+                      <dd className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                        {explanation}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
               </section>
             </>
           ) : null}
-
-          {/* Key Terms */}
-          <hr className="my-7 border-slate-100" />
-          <section aria-labelledby="terms-heading">
-            <h2
-              id="terms-heading"
-              className="text-[10px] font-bold uppercase tracking-widest text-slate-400"
-            >
-              Key Terms
-            </h2>
-
-            {keyTerms && keyTerms.length > 0 ? (
-              <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {keyTerms.map(({ term, explanation }) => (
-                  <li
-                    key={term}
-                    className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 transition-colors hover:border-emerald-200/80 hover:bg-emerald-50/40"
-                  >
-                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                      {term}
-                    </p>
-                    <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                      {explanation}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-3 text-sm italic text-slate-400">
-                Key terms not available for this article.
-              </p>
-            )}
-          </section>
 
           <hr className="my-7 border-slate-100" />
 
@@ -249,7 +241,7 @@ export default async function ArticlePage({ params }: Props) {
                     {formatPublishedDate(rel.published_at)}
                   </div>
                   <p className="text-sm font-semibold leading-snug text-slate-900">
-                    {rel.title}
+                    {rel.simple_title?.trim() || rel.title}
                   </p>
                   {rel.summary ? (
                     <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-slate-600">
