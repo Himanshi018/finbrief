@@ -23,9 +23,40 @@ function isFinanceRelated(title: string, description: string | null): boolean {
   return FINANCE_PATTERN.test(`${title} ${description ?? ""}`);
 }
 
-function stripHtml(text: string | null): string | null {
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function decodeEntity(match: string, name: string): string {
+  if (name.startsWith("#")) {
+    const code = Number(name.slice(1));
+    return Number.isInteger(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : match;
+  }
+  return HTML_ENTITIES[name.toLowerCase()] ?? match;
+}
+
+/**
+ * Normalise NewsAPI text without gluing words together:
+ * - tags become a space (`Near<br>$110` -> `Near $110`, not `Near$110`)
+ * - non-breaking / thin / zero-width spaces become a normal space or vanish
+ * - a missing space after a leading label is restored (`Analysis:Why` -> `Analysis: Why`)
+ */
+function cleanText(text: string | null): string | null {
   if (!text) return null;
-  return text.replace(/<[^>]+>/g, "").replace(/\[\+\d+ chars\]$/, "").trim() || null;
+  const cleaned = text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#\d+|[a-z]+);/gi, decodeEntity)
+    .replace(/[​-‍⁠﻿]/g, "")
+    .replace(/[\s  -   　]+/g, " ")
+    .replace(/\[\+\d+ chars\]$/, "")
+    .replace(/^([A-Z][a-z]+):(?=[A-Z])/, "$1: ")
+    .trim();
+  return cleaned || null;
 }
 
 export async function fetchCategoryNews(
@@ -70,8 +101,10 @@ export async function fetchCategoryNews(
   for (const article of data.articles) {
     if (!article.title || article.title === "[Removed]" || !article.url) continue;
 
-    const description = stripHtml(article.description);
-    if (!isFinanceRelated(article.title, description)) continue;
+    const title = cleanText(article.title);
+    if (!title) continue;
+    const description = cleanText(article.description);
+    if (!isFinanceRelated(title, description)) continue;
 
     const externalId = hashString(article.url);
     if (seen.has(externalId)) continue;
@@ -79,7 +112,7 @@ export async function fetchCategoryNews(
 
     items.push({
       externalId,
-      title: article.title.trim(),
+      title,
       url: article.url,
       description,
       imageUrl: article.urlToImage,

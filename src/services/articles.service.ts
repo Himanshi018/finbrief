@@ -55,6 +55,10 @@ export async function listArticles(params: {
       source:sources ( name )
     `,
     )
+    // Hide articles still waiting for AI fields (see npm run backfill-ai)
+    .not("summary", "is", null)
+    .not("why_it_matters", "is", null)
+    .not("key_terms", "is", null)
     .order("published_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(limit + 1);
@@ -153,6 +157,9 @@ export async function listRelatedArticles(params: {
     )
     .eq("category_id", params.categoryId)
     .neq("id", params.excludeId)
+    .not("summary", "is", null)
+    .not("why_it_matters", "is", null)
+    .not("key_terms", "is", null)
     .order("published_at", { ascending: false })
     .limit(limit);
 

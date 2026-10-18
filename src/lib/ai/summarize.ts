@@ -1,29 +1,13 @@
 import OpenAI from "openai";
 import type { KeyTerm } from "@/types/database";
 
+// Hard caps applied after generation (safety net; prompts aim lower)
 const MAX_WORDS = 60;
 const WHY_MAX_WORDS = 80;
-
-const SYSTEM_PROMPT = `You are FinBrief's finance editor. Summarize news for beginners.
-Rules:
-- Maximum ${MAX_WORDS} words.
-- Plain English; explain jargon in simple terms when needed.
-- Focus on what happened, why it matters for money/markets/business, and who is affected.
-- No bullet points, no markdown, one short paragraph.
-- Do not invent facts not present in the source.`;
-
-const WHY_SYSTEM_PROMPT = `You are a finance teacher explaining to college students and young professionals.`;
 
 // Defaults target Groq; the model only exists there, so the URL must match
 const DEFAULT_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_MODEL = "openai/gpt-oss-120b";
-
-// Reasoning models spend hidden tokens before answering, and those count
-// against max_tokens. Limits are generous; the prompts' word limits plus
-// enforceWordLimit keep the visible output short.
-const SUMMARY_MAX_TOKENS = 1024;
-const WHY_MAX_TOKENS = 1024;
-const KEY_TERMS_MAX_TOKENS = 1536;
 
 // Any OpenAI-compatible provider (OpenAI, Groq, ...). `||` so an empty
 // value in .env.local falls back instead of being used as-is.
@@ -57,17 +41,100 @@ function extractJson(raw: string): string {
   return start !== -1 && end > start ? text.slice(start, end + 1) : text;
 }
 
-export async function summarizeArticle(input: {
+// Prompt targets sit below the hard caps (MAX_WORDS / WHY_MAX_WORDS) so the
+// model finishes its sentences; enforceWordLimit is only a safety net.
+const SUMMARY_TARGET_WORDS = 45;
+const WHY_TARGET_WORDS = 60;
+const INSIGHTS_MAX_TOKENS = 2048;
+
+const INSIGHTS_SYSTEM_PROMPT = `You are FinBrief's finance editor, writing for college students and young professionals.
+Respond with a single JSON object and nothing else, in exactly this shape:
+{"summary": string, "why_it_matters": string, "key_terms": [{"term": string, "explanation": string}]}
+Rules:
+- summary: under ${SUMMARY_TARGET_WORDS} words, one plain-English paragraph on what happened, why it matters for money/markets/business, and who is affected.
+- why_it_matters: under ${WHY_TARGET_WORDS} words, 2-3 sentences on the real-world impact on ordinary people, the economy, jobs, startups or daily life. Neutral and educational; never investment advice.
+- key_terms: 3 to 5 important finance or business terms from the article, each with a one-sentence explanation a college student would understand.
+- Plain text inside strings: no markdown, no headings, no labels like "Summary:".
+- Do not invent facts that are not in the source.`;
+
+export interface ArticleInsights {
+  summary: string | null;
+  whyItMatters: string | null;
+  keyTerms: KeyTerm[] | null;
+}
+
+export type AiUnavailableReason = "auth" | "quota" | "rate_limit" | "model" | "connection";
+
+/**
+ * The provider can't serve any request right now (bad key, no credits, unknown
+ * model, ...). Callers should stop calling AI for the rest of the run.
+ */
+export class AiUnavailableError extends Error {
+  constructor(
+    readonly reason: AiUnavailableReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AiUnavailableError";
+  }
+}
+
+/** Map provider errors that will repeat on every call to AiUnavailableError. */
+function toAiUnavailable(err: unknown, model: string): AiUnavailableError | null {
+  if (err instanceof OpenAI.APIConnectionError) {
+    return new AiUnavailableError("connection", `cannot reach the AI provider (${err.message})`);
+  }
+  if (!(err instanceof OpenAI.APIError)) return null;
+
+  const code = String(err.code ?? "");
+  const detail = err.message.replace(/^\d{3}\s*/, "");
+  if (err.status === 401 || err.status === 403) {
+    return new AiUnavailableError("auth", `API key rejected (${err.status}): ${detail}`);
+  }
+  if (err.status === 404 || code === "model_not_found") {
+    return new AiUnavailableError("model", `model "${model}" is not available: ${detail}`);
+  }
+  if (err.status === 429) {
+    // The SDK has already retried with backoff, so this is not a brief blip
+    return code === "insufficient_quota" || err.type === "insufficient_quota"
+      ? new AiUnavailableError("quota", `out of credits: ${detail}`)
+      : new AiUnavailableError("rate_limit", `rate limited after retries: ${detail}`);
+  }
+  return null;
+}
+
+function parseKeyTerms(value: unknown): KeyTerm[] | null {
+  if (!Array.isArray(value)) return null;
+  const terms = value
+    .filter(
+      (e): e is KeyTerm =>
+        typeof e?.term === "string" && typeof e?.explanation === "string" && e.term.trim() !== "",
+    )
+    .slice(0, 5)
+    .map(({ term, explanation }) => ({ term: term.trim(), explanation: explanation.trim() }));
+  return terms.length > 0 ? terms : null;
+}
+
+function cleanField(value: unknown, cap: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = stripLeadingLabel(value);
+  return text ? enforceWordLimit(text, cap) : null;
+}
+
+/**
+ * Summary, Why It Matters and Key Terms in one request. Fields the model
+ * leaves out or malforms come back null. Returns null when no API key is set
+ * or the reply is unusable; throws AiUnavailableError when the provider
+ * itself is unavailable.
+ */
+export async function generateArticleInsights(input: {
   title: string;
   description: string | null;
-}): Promise<string> {
+}): Promise<ArticleInsights | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return fallbackSummary(input.title, input.description);
-  }
+  if (!apiKey) return null;
 
   const { client, model, reasoning } = createAiClient(apiKey);
-
   const userContent = [
     `Headline: ${input.title}`,
     input.description ? `Details: ${input.description}` : "",
@@ -75,101 +142,43 @@ export async function summarizeArticle(input: {
     .filter(Boolean)
     .join("\n");
 
+  let raw: string | undefined;
   try {
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.4,
-      max_tokens: SUMMARY_MAX_TOKENS,
+      max_tokens: INSIGHTS_MAX_TOKENS,
+      response_format: { type: "json_object" },
       ...reasoning,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: INSIGHTS_SYSTEM_PROMPT },
         { role: "user", content: userContent },
       ],
     });
-
-    const text = stripLeadingLabel(completion.choices[0]?.message?.content ?? "");
-    if (!text) return fallbackSummary(input.title, input.description);
-    return enforceWordLimit(text, MAX_WORDS);
+    raw = completion.choices[0]?.message?.content ?? undefined;
   } catch (err) {
-    console.error("AI summarization failed:", err);
-    return fallbackSummary(input.title, input.description);
-  }
-}
-
-export async function generateWhyItMatters(input: {
-  title: string;
-  summary: string;
-}): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-
-  const { client, model, reasoning } = createAiClient(apiKey);
-
-  const userContent = `Article headline: ${input.title}\nArticle summary: ${input.summary}\n\nWrite a "Why It Matters" section (2-4 sentences maximum) in simple, clear English.\nExplain the real-world impact on ordinary people, economy, jobs, startups, or daily life.\nBe neutral, educational, and never give investment advice.\nFocus on understanding, not speculation.`;
-
-  try {
-    const completion = await client.chat.completions.create({
-      model,
-      temperature: 0.4,
-      max_tokens: WHY_MAX_TOKENS,
-      ...reasoning,
-      messages: [
-        { role: "system", content: WHY_SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-    });
-
-    const text = stripLeadingLabel(completion.choices[0]?.message?.content ?? "");
-    if (!text) return null;
-    return enforceWordLimit(text, WHY_MAX_WORDS);
-  } catch (err) {
-    console.error("Why it matters generation failed:", err);
+    const unavailable = toAiUnavailable(err, model);
+    if (unavailable) throw unavailable;
+    console.warn(`[ai] request failed for "${input.title.slice(0, 60)}": ${err instanceof Error ? err.message : err}`);
     return null;
   }
-}
 
-export async function generateKeyTerms(input: {
-  title: string;
-  summary: string;
-}): Promise<KeyTerm[] | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-
-  const { client, model, reasoning } = createAiClient(apiKey);
-
-  const userContent = `Article: ${input.title}\nSummary: ${input.summary}\n\nIdentify 3 to 5 important finance or business terms from this article. For each, write a one-sentence plain-English explanation a college student would understand.\n\nReturn ONLY a JSON array, no extra text:\n[{"term": "...", "explanation": "..."}, ...]`;
-
-  try {
-    const completion = await client.chat.completions.create({
-      model,
-      temperature: 0.3,
-      max_tokens: KEY_TERMS_MAX_TOKENS,
-      ...reasoning,
-      messages: [
-        { role: "system", content: "You are a finance teacher. Respond only with a valid JSON array." },
-        { role: "user", content: userContent },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim();
-    if (!raw) return null;
-
-    const parsed = JSON.parse(extractJson(raw)) as unknown;
-
-    if (!Array.isArray(parsed)) return null;
-    return (parsed as Array<{ term: unknown; explanation: unknown }>)
-      .filter((e) => typeof e.term === "string" && typeof e.explanation === "string")
-      .slice(0, 5)
-      .map(({ term, explanation }) => ({ term: term as string, explanation: explanation as string }));
-  } catch (err) {
-    console.error("Key terms generation failed:", err);
+  if (!raw?.trim()) {
+    console.warn(`[ai] empty reply for "${input.title.slice(0, 60)}"`);
     return null;
   }
-}
 
-function fallbackSummary(title: string, description: string | null): string {
-  const base = description?.trim() || title;
-  return enforceWordLimit(base, MAX_WORDS);
+  try {
+    const parsed = JSON.parse(extractJson(raw)) as Record<string, unknown>;
+    return {
+      summary: cleanField(parsed.summary, MAX_WORDS),
+      whyItMatters: cleanField(parsed.why_it_matters, WHY_MAX_WORDS),
+      keyTerms: parseKeyTerms(parsed.key_terms),
+    };
+  } catch {
+    console.warn(`[ai] reply was not valid JSON for "${input.title.slice(0, 60)}"`);
+    return null;
+  }
 }
 
 function enforceWordLimit(text: string, limit: number): string {
