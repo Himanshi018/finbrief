@@ -1,0 +1,111 @@
+
+> finbrief@0.1.0 cleanup-articles
+> tsx --experimental-websocket scripts/cleanup-articles.ts --dry-run
+
+[cleanup] checking 48 article(s) with the keyword filter and AI gate (dry run)
+[cleanup] Dry run: 17 of 48 article(s) would be deleted, 31 kept, 3 recategorised (32 AI checks) in 101.1s
+
+== Would delete (17)
+  Senior doctors say Health NZ offer amounts to 'pay cut'
+      [filter] weak signal (only "inflation" in description)
+  How Investors Are Reacting To Iyogin Holdings Stock After Buyback Completion
+      [filter] clickbait title ("How Investors Are Reacting To")
+  Stock Fair Value Edges Lower As Analysts Weigh Quantum Progress And Risks
+      [filter] clickbait title ("Stock Fair Value")
+  Arunachal Pradesh Chief Minister Pema Khandu calls for roadmap to boost yak economy,...
+      [ai] The story focuses on regional agricultural policy and herders' income without broader market, macroeconomic, or financial industry impact.
+  Stock Is Down 25% Year to Date. History Says Patient Investors Get Rewarded
+      [filter] clickbait title ("History Says")
+  Stock Looks Fully Priced Even After Its 83% Run
+      [filter] clickbait title ("Fully Priced")
+  Trump Blaming Top Advisors for ‘Faltering Midterm Strategy’ Just Weeks Ahead of Elec...
+      [filter] no finance keywords
+  Wheelchair-bound 'courageous' 7-year-old who was shot in the face by Oregon school s...
+      [filter] no finance keywords
+  Daily Deals Drop: Hisense 55″ 4K Smart TV, LEGO Star Wars Chopper, $49.99 15.6 Inch ...
+      [filter] no finance keywords
+  House Speaker Mike Johnson draws on faith as he fights to hold the Republican majori...
+      [filter] no finance keywords
+  Starling Releases Free Linux Desktop, Office Apps, Terminal, and SDK
+      [filter] weak signal (only "startup" in description)
+  Nightmare on Friday night: Long-distance buses crawl out of Bengaluru till 2.30am
+      [filter] no finance keywords
+  MP Materials vs. USA Rare Earth: Which Rare Earth Stock Is the Better Buy?
+      [filter] clickbait title ("Better Buy")
+  Prediction: Cisco Stock Could Surprise Wall Street by 2030
+      [filter] clickbait title ("Prediction:")
+  Bank of America sees 40% upside in AI’s next bottleneck
+      [filter] AI story without a business angle
+  Roope Hintz and Nathan MacKinnon trade punches in heated NHL showdown
+      [filter] no finance keywords
+  Your daily chai under scanner: FSSAI proposes new science-based limits for two pesti...
+      [filter] no finance keywords
+
+== Keep (31)
+  Ship attacks in Strait of Hormuz hit record high since Iran war began
+      [ai] Geopolitical attacks on oil shipping routes can affect oil prices and global markets
+  Ontario to import U.S. electricity this winter, weeks after Ford threatened to cut p...
+      [ai] Energy trade and cross‑border electricity imports affect markets and the economy, making it finance‑relevant.
+  CoreWeave’s Founders Have Sold $3.3 Billion of Stock Since Its IPO
+      [ai] Reports founders selling billions of stock, a significant corporate finance event
+  Zelenskyy urges support for new U.S. sanctions on Russia put on hold by Trump
+      [ai] Sanctions on Russia have direct economic and market implications, fitting the geopolitics with economic impact criterion.
+  Binance.US Seeks $100 Million Funding Round At $1 Billion Valuation
+      [ai] Story about a crypto exchange seeking a large funding round is relevant to fintech and funding news.
+  U.S. debt interest payments hit $3 billion a day and jumped 8% in fiscal 2026 — fast...
+      [ai] Discusses U.S. debt interest, budget deficit and fiscal data, which are core economic and finance topics.
+  Jio Platforms IPO: Terrific history, but is the future prized or pricey?
+      [ai] The story discusses an IPO and valuation, which are directly related to markets and company finance.
+  CFTC advances crypto regulation plan after CLARITY Act defeat in Senate
+      [ai] Regulatory actions affecting crypto markets are directly relevant to finance.
+  Bonfiglioli IPO: Exposure to manufacturing and infrastructure led growth
+      [ai] The story covers an IPO, which is directly related to markets and corporate finance.
+  Missing middle should catch up with medical inflation
+      [ai] Discusses medical inflation and insurance's economic impact, fitting economy/finance topics
+  Axis Bank’s rising costs, FCNR inflows squeeze Q2 margins
+      [ai] Discusses a bank's financial performance, margins, and inflows, which are core finance topics.
+  Grayscale Opens DeFi And AI Crypto Funds To Investors With Just $2,500
+      [ai] Discusses new crypto investment funds and their financing details, fitting fintech and crypto finance coverage
+  International Oil prices to jump 'super spike', claims energy research analyst, pred...
+      [ai] Discusses oil price movements and supply-demand factors affecting the global economy
+      move: economy -> global-finance
+  Iran’s Guards Say Two Tankers Hit Mines In Strait Of Hormuz
+      [ai] Geopolitical event affecting oil supply routes impacts markets and economy
+      move: economy -> global-finance
+  YES Bank Q2 profit up 65% on NII; AT1 ruling impact not yet reflected
+      [ai] Bank earnings and regulatory ruling impact are core finance topics
+  Chandigarh real estate sees major deals as industrial plot fetches ₹200 crore, Secto...
+      [ai] Covers major real estate transactions and property market trends, which are finance-relevant.
+  ICICI Bank Q2 profit jumps 20.1% to ₹14,843 crore; margins come under pressure
+      [ai] Bank earnings and margin data are core finance news
+  HDFC Bank veteran Kaizad Bharucha quits
+      [ai] Bank leadership change directly impacts the financial sector and markets
+  Congress passed the Russia sanctions bill named for Lindsey Graham with bipartisan s...
+      [ai] Sanctions on Russia have direct market and economic implications, fitting finance relevance criteria
+      move: economy -> global-finance
+  PRC examiners won’t probe sale of TXNM stock to Zimmer
+      [ai] Regulatory decision on a stock sale impacts markets and investors
+  Mortgage Rates Hit 7.4%, a Nearly 3-Year High. A Retiree Trading His 3% Mortgage for...
+      [ai] Discusses mortgage rates and personal finance impacts, which are directly economic topics.
+  Deutsche Bank Is Weeks From Holding Bitcoin and Ethereum for Clients. Could Other Bi...
+      [ai] Covers a major bank's crypto custody services, relevant to fintech, banking and crypto markets
+  Anthropic’s Louisiana data center could generate $1.3 billion a month
+      [ai] Discusses AI infrastructure revenue and its impact on economies and IPO valuations, fitting finance and AI business relevance
+  Anthropic’s Dario Amodei is steering a possible $2 trillion IPO—but he says up to 40...
+      [ai] Discusses a major AI company's potential IPO and business focus, which is finance-relevant.
+  TSMC: The AI Cycle Just Sent Another Signal
+      [ai] Company earnings and AI semiconductor market impact are finance-relevant topics
+  House-help app Snabbit burns Rs 195 crore to chase Rs 12-crore revenues in FY26
+      [ai] Story covers startup funding and revenue, which falls under fintech and business news
+  Axis Bank's Freecharge gets in-principle RBI nod to operate as payment aggregator
+      [ai] In‑principle RBI approval for a bank's payment aggregator impacts fintech, banking regulation and payments.
+  Rising borrowing costs signal funding risks for global AI expansion: Jefferies report
+      [ai] Discusses credit risk, borrowing costs and funding for AI companies, which relates to markets, corporate finance and AI business funding.
+  Who is Ankit Jain? Former Dyson India MD’s startup Foundry raises ₹12 crore in a pre...
+      [ai] Story reports startup pre-seed funding, which falls under startup funding and business deals.
+  Harvard Endowment Returns 27.1% in FY 2026
+      [ai] Reports on a major endowment's investment performance and asset growth are directly related to finance and markets.
+  Rupeeflo bets on GIFT City, targets 30% revenue share as Bengaluru-based fintech eye...
+      [ai] Fintech company expanding payments services in GIFT City impacts financial services and markets
+
+Dry run: 17 of 48 article(s) would be deleted, 31 kept, 3 recategorised (32 AI checks) in 101.1s
