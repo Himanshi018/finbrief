@@ -1,4 +1,5 @@
 import { fetchAllCategoryNews, type FilterDecision } from "@/lib/newsapi/client";
+import { fetchAllRssNews } from "@/lib/rss/client";
 import { CATEGORY_DEFINITIONS, INDIA_BOOST_HOURS } from "@/lib/constants/categories";
 import {
   AiUnavailableError,
@@ -20,6 +21,24 @@ export const MAX_INGEST_ARTICLES = 50;
  */
 const AI_CALLS_PER_ARTICLE_BUDGET = 3;
 
+/**
+ * NEWS_SOURCE picks where articles come from. RSS is the default because
+ * NewsAPI's free plan is dev-only and delays articles by 24h.
+ */
+const NEWS_SOURCES = {
+  rss: { label: "RSS feeds", fetch: fetchAllRssNews },
+  newsapi: { label: "NewsAPI", fetch: fetchAllCategoryNews },
+} as const;
+export type NewsSource = keyof typeof NEWS_SOURCES;
+
+export function resolveNewsSource(): NewsSource {
+  const value = process.env.NEWS_SOURCE?.trim().toLowerCase() || "rss";
+  if (!(value in NEWS_SOURCES)) {
+    throw new Error(`NEWS_SOURCE must be "rss" or "newsapi" (got "${process.env.NEWS_SOURCE}")`);
+  }
+  return value as NewsSource;
+}
+
 export interface IngestOptions {
   maxArticles?: number;
   /** Fetch and filter only; no AI calls and no database writes. */
@@ -29,6 +48,8 @@ export interface IngestOptions {
 export interface IngestResult {
   message: string;
   dryRun: boolean;
+  /** Which NEWS_SOURCE this run used. */
+  source: NewsSource | null;
   maxArticles: number;
   fetched: number;
   inserted: number;
@@ -302,6 +323,7 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
   const result: IngestResult = {
     message: "",
     dryRun,
+    source: null,
     maxArticles,
     fetched: 0,
     inserted: 0,
@@ -349,6 +371,17 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     return result;
   };
 
+  let source: NewsSource;
+  try {
+    source = resolveNewsSource();
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return finish();
+  }
+  result.source = source;
+  const { label, fetch: fetchNews } = NEWS_SOURCES[source];
+  log(`source: ${label} (NEWS_SOURCE=${source})`);
+
   if (dryRun) {
     result.decisions = [];
     result.warnings.push(...(await findMissingCategorySlugs()));
@@ -356,16 +389,20 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
 
   let items: RawNewsItem[];
   try {
-    items = await fetchAllCategoryNews(dryRun ? (d) => result.decisions!.push(d) : undefined);
+    items = await fetchNews(dryRun ? (d) => result.decisions!.push(d) : undefined);
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : "News fetch failed");
     return finish();
   }
 
   result.fetched = items.length;
-  log(`fetched ${items.length} finance articles from NewsAPI`);
+  log(`fetched ${items.length} finance articles from ${label}`);
   if (items.length === 0) {
-    result.warnings.push("NewsAPI returned no usable articles; check NEWS_API_KEY and the server log");
+    result.warnings.push(
+      source === "newsapi"
+        ? "NewsAPI returned no usable articles; check NEWS_API_KEY and the server log"
+        : "RSS feeds returned no usable articles; check the feed errors in the server log",
+    );
   }
 
   // Round-robin across categories (each newest-first) instead of one global
@@ -406,7 +443,7 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
         continue;
       }
 
-      // Insert even when AI fails: NewsAPI won't return this story again
+      // Insert even when AI fails: the source won't return this story again
       // once it ages out, and the feed hides it until it's backfilled.
       if (ai.calls >= maxAiCalls) {
         result.warnings.push(

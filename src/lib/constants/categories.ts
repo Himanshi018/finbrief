@@ -103,6 +103,12 @@ export const CLICKBAIT_TITLE_PATTERNS: RegExp[] = [
   /\b(millionaire|get rich|passive income|retire (early|rich))\b/i,
   /\b(no-brainer|screaming buy|fully priced)\b/i,
   /\bdividend dollars\b/i,
+  // Indian stock-tip formats ("Small-cap stock under ₹50 with a dividend...", "Multibagger
+  // penny stock..."). "small-cap stock" is singular only: "Small-cap stocks slump 3%" is market news.
+  /\b(stocks?|shares) (under|below) (₹|rs\.?\s?|inr\s?|\$)\s?\d/i,
+  /\bmultibaggers?\b/i,
+  /\bpenny stocks?\b/i,
+  /\b(small|mid|micro)[- ]?cap stock\b/i,
 ];
 
 /** "AI" alone isn't finance news; it needs one of these alongside it. */

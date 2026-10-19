@@ -10,6 +10,7 @@ import { getArticleById, listRelatedArticles } from "@/services/articles.service
 import { formatPublishedDate } from "@/lib/utils/date";
 import { getSiteUrl } from "@/lib/seo/site-url";
 import { APP_NAME } from "@/lib/constants/categories";
+import { extractDomain } from "@/lib/utils/cn";
 import type { KeyTerm } from "@/types/database";
 
 type Props = { params: Promise<{ id: string }> };
@@ -56,6 +57,7 @@ export default async function ArticlePage({ params }: Props) {
   const hasSimpleTitle = headline !== article.title;
   const categoryName = article.category?.name ?? "Finance";
   const sourceName = article.source?.name ?? "Source";
+  const sourceDomain = extractDomain(article.url);
   const articleUrl = `${getSiteUrl()}/articles/${article.id}`;
   const keyTerms: KeyTerm[] | null = article.key_terms ?? null;
 
@@ -111,10 +113,20 @@ export default async function ArticlePage({ params }: Props) {
 
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Read the original on ${sourceName}`}
+              className="inline-flex items-center gap-1.5 font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-emerald-800 hover:decoration-emerald-400"
+            >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
               {sourceName}
-            </span>
+              <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden>
+                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+              </svg>
+            </a>
             <span aria-hidden>·</span>
             <time dateTime={article.published_at}>
               {formatPublishedDate(article.published_at)}
@@ -198,11 +210,16 @@ export default async function ArticlePage({ params }: Props) {
 
           <hr className="my-7 border-slate-100" />
 
-          {/* Read full article CTA */}
+          {/* Original source: FinBrief only stores the headline, a short teaser and this link */}
           <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 text-center sm:p-6">
-            <p className="mb-4 text-sm text-slate-500">
-              This is an AI-generated summary. Read the complete story on{" "}
-              <span className="font-semibold text-slate-700">{sourceName}</span>.
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Original source
+            </p>
+            <p className="mt-2 text-base font-semibold text-slate-800">{sourceName}</p>
+            {sourceDomain ? <p className="text-xs text-slate-500">{sourceDomain}</p> : null}
+            <p className="mb-4 mt-3 text-sm text-slate-500">
+              The summary above is AI-generated from the headline and teaser. The full story is
+              published by <span className="font-semibold text-slate-700">{sourceName}</span>.
             </p>
             <a
               href={article.url}
@@ -210,7 +227,7 @@ export default async function ArticlePage({ params }: Props) {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-800 px-6 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:bg-emerald-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
             >
-              Read full article
+              Read full article on {sourceName}
               <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor" aria-hidden>
                 <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
                 <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />

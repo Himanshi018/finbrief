@@ -111,7 +111,7 @@ export interface FilterDecision {
   reason: string;
 }
 
-type DecisionSink = (decision: FilterDecision) => void;
+export type DecisionSink = (decision: FilterDecision) => void;
 
 const HTML_ENTITIES: Record<string, string> = {
   amp: "&",
@@ -131,12 +131,12 @@ function decodeEntity(match: string, name: string): string {
 }
 
 /**
- * Normalise NewsAPI text without gluing words together:
+ * Normalise NewsAPI / RSS text without gluing words together:
  * - tags become a space (`Near<br>$110` -> `Near $110`, not `Near$110`)
  * - non-breaking / thin / zero-width spaces become a normal space or vanish
  * - a missing space after a leading label is restored (`Analysis:Why` -> `Analysis: Why`)
  */
-function cleanText(text: string | null): string | null {
+export function cleanText(text: string | null): string | null {
   if (!text) return null;
   const cleaned = text
     .replace(/<[^>]+>/g, " ")
@@ -242,12 +242,21 @@ function titleKey(title: string): string {
     .trim();
 }
 
+export type CategoryFetcher = (
+  categorySlug: CategorySlug,
+  onDecision: DecisionSink,
+) => Promise<RawNewsItem[]>;
+
 /**
- * Fetch every category. A story returned by several queries (same URL or same
- * headline) keeps the first category in CATEGORY_DEFINITIONS order.
+ * Fetch every category with `fetchCategory` (NewsAPI query or RSS feeds). A
+ * story returned for several categories (same URL or same headline) keeps the
+ * first category in CATEGORY_DEFINITIONS order.
  * `onDecision` gets exactly one final decision per article for dry-run reports.
  */
-export async function fetchAllCategoryNews(onDecision?: DecisionSink): Promise<RawNewsItem[]> {
+export async function collectCategoryNews(
+  fetchCategory: CategoryFetcher,
+  onDecision?: DecisionSink,
+): Promise<RawNewsItem[]> {
   const byUrl = new Map<string, RawNewsItem>();
   const byTitle = new Map<string, RawNewsItem>();
 
@@ -255,7 +264,7 @@ export async function fetchAllCategoryNews(onDecision?: DecisionSink): Promise<R
     try {
       // Hold back accepts until the duplicate check below has had its say
       const accepted = new Map<string, FilterDecision>();
-      const batch = await fetchCategoryNews(cat.slug, 15, (d) =>
+      const batch = await fetchCategory(cat.slug, (d) =>
         d.accepted ? accepted.set(d.title, d) : onDecision?.(d),
       );
       for (const item of batch) {
@@ -284,4 +293,9 @@ export async function fetchAllCategoryNews(onDecision?: DecisionSink): Promise<R
   }
 
   return [...byUrl.values()];
+}
+
+/** NewsAPI ingestion entry point (NEWS_SOURCE=newsapi). */
+export function fetchAllCategoryNews(onDecision?: DecisionSink): Promise<RawNewsItem[]> {
+  return collectCategoryNews((slug, sink) => fetchCategoryNews(slug, 15, sink), onDecision);
 }
