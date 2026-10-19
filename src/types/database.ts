@@ -38,6 +38,12 @@ export interface Article {
   why_it_matters: string | null;
   key_terms: KeyTerm[] | null;
   image_url: string | null;
+  /**
+   * Photographer credit when image_url is a Pexels stock photo (migration 005).
+   * Optional: rows read before the migration don't have the columns.
+   */
+  image_credit_name?: string | null;
+  image_credit_url?: string | null;
   category_id: string | null;
   source_id: string | null;
   published_at: string;

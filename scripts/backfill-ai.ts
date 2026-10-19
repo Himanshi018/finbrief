@@ -6,22 +6,37 @@
  *   npm run backfill-ai -- --max 30      # up to 30 (hard cap: MAX_INGEST_ARTICLES)
  *   npm run backfill-ai -- --dry-run     # list what's pending; no AI calls, no DB writes
  *   npm run backfill-ai -- --delay 8000  # ms between articles (default 5000, for Groq's free tier)
+ *   npm run backfill-ai -- --images      # instead: real photos (page og:image, then Pexels) for
+ *                                        # articles with no image or a /category/*.svg one
  */
 import { loadEnv, parseArgs, printList, runMain } from "./cli";
 
 loadEnv();
 
 runMain(async () => {
-  const args = parseArgs(process.argv.slice(2), ["max", "delay"]);
+  const args = parseArgs(process.argv.slice(2), ["max", "delay", "images"]);
   if (args.help) {
-    console.log("Usage: npm run backfill-ai -- [--max N] [--delay MS] [--dry-run]");
+    console.log("Usage: npm run backfill-ai -- [--max N] [--delay MS] [--images] [--dry-run]");
     return;
   }
 
-  const { runAiBackfill, MAX_INGEST_ARTICLES } = await import("../src/services/ingest.service");
+  const { runAiBackfill, runImageBackfill, MAX_INGEST_ARTICLES } = await import(
+    "../src/services/ingest.service"
+  );
 
   if (args.max !== undefined && args.max > MAX_INGEST_ARTICLES) {
     console.warn(`--max ${args.max} exceeds the cap; using ${MAX_INGEST_ARTICLES}`);
+  }
+
+  if (args.images) {
+    const result = await runImageBackfill({ maxArticles: args.max, dryRun: args.dryRun });
+    printList(result.dryRun ? "Would set:" : "Set:", result.details);
+    printList("Errors:", result.errors);
+    console.log(`\n${result.message}`);
+    if (result.errors.length && result.fromOgImage + result.fromPexels === 0 && !result.dryRun) {
+      process.exitCode = 1;
+    }
+    return;
   }
 
   const result = await runAiBackfill({

@@ -7,7 +7,10 @@ import {
   generateArticleInsights,
   type ArticleInsights,
 } from "@/lib/ai/summarize";
+import { fetchOgImage } from "@/lib/images/og-image";
+import { findStockPhoto, type StockPhoto } from "@/lib/images/pexels";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { CategorySlug } from "@/types/database";
 import type { RawNewsItem } from "@/types/news";
 
 /** Default batch size when the caller doesn't specify one. */
@@ -52,6 +55,12 @@ export interface IngestResult {
   source: NewsSource | null;
   maxArticles: number;
   fetched: number;
+  /** Fetched articles that came with a feed thumbnail. */
+  withThumbnail: number;
+  /** Articles inserted with the page's og:image because the feed had no thumbnail. */
+  ogImages: number;
+  /** Articles inserted with a Pexels photo because neither the feed nor the page had one. */
+  stockPhotos: number;
   inserted: number;
   /** Already in the database. */
   skipped: number;
@@ -261,7 +270,20 @@ export function createRejectionStore(warnings: string[]) {
   };
 }
 
-async function insertArticle(item: RawNewsItem, insights: ArticleInsights | null) {
+/** Credit columns only when there is a credit, so thumbnail-only inserts work before migration 005. */
+function photoFields(photo: StockPhoto) {
+  return {
+    image_url: photo.url,
+    image_credit_name: photo.photographer,
+    image_credit_url: photo.photographerUrl,
+  };
+}
+
+async function insertArticle(
+  item: RawNewsItem,
+  insights: ArticleInsights | null,
+  photo: StockPhoto | null,
+) {
   const supabase = createAdminClient();
   const [sourceId, categoryId] = await Promise.all([
     upsertSource(item.sourceName, item.sourceDomain),
@@ -280,6 +302,7 @@ async function insertArticle(item: RawNewsItem, insights: ArticleInsights | null
     why_it_matters: insights?.whyItMatters ?? null,
     key_terms: insights?.keyTerms ?? null,
     image_url: item.imageUrl,
+    ...(photo && photoFields(photo)),
     source_id: sourceId,
     category_id: categoryId,
     published_at: item.publishedAt,
@@ -292,11 +315,15 @@ async function insertArticle(item: RawNewsItem, insights: ArticleInsights | null
   return true;
 }
 
-/** Point at the migration when the DB predates the simple_title column. */
+/** Point at the migration when the DB predates the simple_title or image credit columns. */
 function withMigrationHint(message: string): string {
-  return /simple_title/.test(message)
-    ? `${message}. Run supabase/migrations/003_article_simple_title.sql in the Supabase SQL editor.`
-    : message;
+  if (/simple_title/.test(message)) {
+    return `${message}. Run supabase/migrations/003_article_simple_title.sql in the Supabase SQL editor.`;
+  }
+  if (/image_credit/.test(message)) {
+    return `${message}. Run supabase/migrations/005_article_image_credit.sql in the Supabase SQL editor.`;
+  }
+  return message;
 }
 
 // Guards against overlapping runs within one server process (double-clicks,
@@ -326,6 +353,9 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
     source: null,
     maxArticles,
     fetched: 0,
+    withThumbnail: 0,
+    ogImages: 0,
+    stockPhotos: 0,
     inserted: 0,
     skipped: 0,
     previouslyRejected: 0,
@@ -396,7 +426,8 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
   }
 
   result.fetched = items.length;
-  log(`fetched ${items.length} finance articles from ${label}`);
+  result.withThumbnail = items.filter((item) => item.imageUrl).length;
+  log(`fetched ${items.length} finance articles from ${label} (${result.withThumbnail} with a thumbnail)`);
   if (items.length === 0) {
     result.warnings.push(
       source === "newsapi"
@@ -438,7 +469,8 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
       }
 
       if (dryRun) {
-        result.candidates!.push(`[${item.categorySlug}]${item.india ? " (India)" : ""} ${item.title}`);
+        const image = item.imageUrl ? "" : " (no feed thumbnail: og:image at insert)";
+        result.candidates!.push(`[${item.categorySlug}]${item.india ? " (India)" : ""} ${item.title}${image}`);
         processed += 1;
         continue;
       }
@@ -464,9 +496,19 @@ async function ingest(options?: IngestOptions): Promise<IngestResult> {
       }
       const aiFailed = !isComplete(insights);
 
-      const inserted = await insertArticle(item, insights);
+      // No feed thumbnail: the article page's og:image (the publisher's news
+      // photo), then a Pexels photo if PEXELS_API_KEY is set; else no image
+      const ogImage = item.imageUrl ? null : await fetchOgImage(item.url);
+      const photo =
+        item.imageUrl || ogImage
+          ? null
+          : await findStockPhoto(insights?.simpleTitle ?? item.title, item.categorySlug, item.externalId);
+
+      const inserted = await insertArticle({ ...item, imageUrl: item.imageUrl ?? ogImage }, insights, photo);
       if (inserted) {
         result.inserted += 1;
+        if (ogImage) result.ogImages += 1;
+        if (photo) result.stockPhotos += 1;
         processed += 1;
         if (aiFailed) result.aiFailures += 1;
         log(
@@ -655,12 +697,128 @@ export async function runAiBackfill(options?: BackfillOptions): Promise<Backfill
   return finish();
 }
 
+// ---------------------------------------------------------------------------
+// Image backfill: give stored articles without a real photo the page's og:image
+// ---------------------------------------------------------------------------
+
+/** No image, an empty one, or one of the old /category/*.svg illustrations. */
+const MISSING_IMAGE_FILTER = 'image_url.is.null,image_url.eq."",image_url.like.*/category/*';
+
+export interface ImageBackfillOptions {
+  maxArticles?: number;
+  /** Look up each og:image and report it; no database writes. */
+  dryRun?: boolean;
+}
+
+export interface ImageBackfillResult {
+  message: string;
+  dryRun: boolean;
+  /** Articles without a real photo (before this run). */
+  pending: number;
+  /** Got the page's og:image (in a dry run: would get it). */
+  fromOgImage: number;
+  /** Got a Pexels photo because the page had none (only with PEXELS_API_KEY). */
+  fromPexels: number;
+  /** No photo found; the card shows no image. */
+  notFound: number;
+  durationMs: number;
+  /** "title -> image URL" per article. */
+  details: string[];
+  errors: string[];
+}
+
+interface ImageBackfillRow {
+  id: string;
+  title: string;
+  simple_title: string | null;
+  url: string;
+  category: { slug: CategorySlug } | null;
+}
+
+export async function runImageBackfill(options?: ImageBackfillOptions): Promise<ImageBackfillResult> {
+  const startedAt = Date.now();
+  const maxArticles = resolveMaxArticles(options?.maxArticles);
+  const dryRun = options?.dryRun ?? false;
+  const supabase = createAdminClient();
+  const result: ImageBackfillResult = {
+    message: "",
+    dryRun,
+    pending: 0,
+    fromOgImage: 0,
+    fromPexels: 0,
+    notFound: 0,
+    durationMs: 0,
+    details: [],
+    errors: [],
+  };
+
+  const finish = () => {
+    result.durationMs = Date.now() - startedAt;
+    const secs = (result.durationMs / 1000).toFixed(1);
+    const found = result.fromOgImage + result.fromPexels;
+    result.message =
+      `${dryRun ? "Dry run: would add" : "Added"} photos to ${found} of ${result.pending} article(s) without one` +
+      ` (${result.fromOgImage} og:image` +
+      (result.fromPexels ? `, ${result.fromPexels} Pexels` : "") +
+      (result.notFound ? `, ${result.notFound} with no photo found` : "") +
+      `) in ${secs}s`;
+    log(result.message);
+    return result;
+  };
+
+  const { data, count, error } = await supabase
+    .from("articles")
+    .select("id,title,simple_title,url,category:categories ( slug )", { count: "exact" })
+    .or(MISSING_IMAGE_FILTER)
+    .order("published_at", { ascending: false })
+    .limit(maxArticles);
+  if (error) {
+    result.errors.push(error.message);
+    return finish();
+  }
+
+  const rows = (data ?? []) as unknown as ImageBackfillRow[];
+  result.pending = count ?? rows.length;
+  log(`image backfill: ${result.pending} article(s) without a photo; processing up to ${maxArticles}${dryRun ? " (dry run)" : ""}`);
+
+  for (const row of rows) {
+    const title = (row.simple_title ?? row.title).slice(0, 70);
+    const ogImage = await fetchOgImage(row.url);
+    // Pexels only when the page has no photo, and never in a dry run (it spends API quota)
+    const photo =
+      ogImage || dryRun ? null : await findStockPhoto(row.simple_title ?? row.title, row.category?.slug ?? "markets", row.id);
+
+    if (!ogImage && !photo) {
+      result.notFound += 1;
+      result.details.push(`${title} -> no photo found`);
+      continue;
+    }
+
+    if (!dryRun) {
+      // Credit columns only for Pexels, so og:image updates work before migration 005
+      const patch = photo ? photoFields(photo) : { image_url: ogImage };
+      const { error: updateError } = await supabase.from("articles").update(patch).eq("id", row.id);
+      if (updateError) {
+        result.errors.push(`${row.title}: ${withMigrationHint(updateError.message)}`);
+        continue;
+      }
+    }
+    if (photo) result.fromPexels += 1;
+    else result.fromOgImage += 1;
+    result.details.push(`${title} -> ${photo ? `Pexels (${photo.photographer})` : ogImage}`);
+  }
+
+  return finish();
+}
+
 function summarize(r: IngestResult): string {
   const secs = (r.durationMs / 1000).toFixed(1);
   if (r.dryRun) {
-    return `Dry run: ${r.candidates?.length ?? 0} new article(s) would be inserted (fetched ${r.fetched}, ${r.skipped} already stored) in ${secs}s`;
+    return `Dry run: ${r.candidates?.length ?? 0} new article(s) would be inserted (fetched ${r.fetched}, ${r.withThumbnail} with a feed thumbnail, ${r.skipped} already stored) in ${secs}s`;
   }
   const parts = [`Inserted ${r.inserted} new article(s)`, `fetched ${r.fetched}`, `${r.skipped} already stored`];
+  if (r.ogImages) parts.push(`${r.ogImages} with the page's og:image`);
+  if (r.stockPhotos) parts.push(`${r.stockPhotos} with a Pexels photo`);
   if (r.rejectedByAi) parts.push(`${r.rejectedByAi} rejected as not finance`);
   if (r.previouslyRejected) parts.push(`${r.previouslyRejected} rejected earlier`);
   if (r.errors.length) parts.push(`${r.errors.length} error(s)`);

@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SaveArticleButton } from "@/components/feed/SaveArticleButton";
 import { ShareButtons } from "@/components/article/ShareButtons";
 import { WhyItMatters } from "@/components/article/WhyItMatters";
+import { ArticleImage } from "@/components/article/ArticleImage";
 import { getArticleById, listRelatedArticles } from "@/services/articles.service";
 import { formatPublishedDate } from "@/lib/utils/date";
 import { getSiteUrl } from "@/lib/seo/site-url";
@@ -83,33 +83,21 @@ export default async function ArticlePage({ params }: Props) {
           </Link>
         </div>
 
-        {/* Hero image */}
-        {article.image_url ? (
-          <div className="relative mt-1 aspect-[16/9] w-full overflow-hidden rounded-2xl bg-slate-100 shadow-sm">
-            <Image
-              src={article.image_url}
-              alt=""
-              fill
-              priority
-              unoptimized
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 672px"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent" />
-            <span className="absolute bottom-4 left-4 rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-emerald-900 shadow-sm">
-              {categoryName}
-            </span>
-          </div>
-        ) : null}
+        {/* Hero photo (feed thumbnail, og:image or Pexels); hidden when there is none */}
+        <ArticleImage
+          src={article.image_url}
+          creditName={article.image_credit_name}
+          creditUrl={article.image_credit_url}
+          priority
+          sizes="(max-width: 768px) 100vw, 672px"
+          className="mb-5 mt-1 rounded-2xl shadow-sm"
+        />
 
         {/* Card content */}
-        <div className="mt-5 rounded-2xl border border-slate-200/80 bg-white px-5 py-6 shadow-sm sm:px-8 sm:py-8">
-          {/* Category pill (no-image variant) */}
-          {!article.image_url ? (
-            <span className="mb-4 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
-              {categoryName}
-            </span>
-          ) : null}
+        <div className="rounded-2xl border border-slate-200/80 bg-white px-5 py-6 shadow-sm sm:px-8 sm:py-8">
+          <span className="mb-4 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
+            {categoryName}
+          </span>
 
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
@@ -210,7 +198,7 @@ export default async function ArticlePage({ params }: Props) {
 
           <hr className="my-7 border-slate-100" />
 
-          {/* Original source: FinBrief only stores the headline, a short teaser and this link */}
+          {/* Original source: FinBrief stores only the headline, a short teaser, the thumbnail URL and this link */}
           <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 text-center sm:p-6">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
               Original source

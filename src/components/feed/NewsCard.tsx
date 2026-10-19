@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { formatPublishedDate } from "@/lib/utils/date";
 import {
@@ -12,6 +11,7 @@ import type { ArticleWithRelations } from "@/types/database";
 import { SaveArticleButton } from "@/components/feed/SaveArticleButton";
 import { WhyItMatters } from "@/components/article/WhyItMatters";
 import { KeyTermChips } from "@/components/article/KeyTermChips";
+import { ArticleImage } from "@/components/article/ArticleImage";
 
 interface NewsCardProps {
   article: ArticleWithRelations;
@@ -54,20 +54,13 @@ export function NewsCard({
         className,
       )}
     >
-      {article.image_url ? (
-        <Link href={href} tabIndex={-1} aria-hidden>
-          <div className="relative aspect-[21/9] w-full overflow-hidden bg-slate-100 sm:aspect-[2/1]">
-            <Image
-              src={article.image_url}
-              alt=""
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 672px"
-              unoptimized
-            />
-          </div>
-        </Link>
-      ) : null}
+      <ArticleImage
+        src={article.image_url}
+        creditName={article.image_credit_name}
+        creditUrl={article.image_credit_url}
+        href={href}
+        sizes="(max-width: 768px) 100vw, 672px"
+      />
 
       <div className="p-4 sm:p-6">
         {/* Category + time, with save on the right */}
@@ -106,7 +99,20 @@ export function NewsCard({
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
           <p className="min-w-0 truncate text-xs text-slate-500">
-            via <span className="font-semibold text-slate-700">{sourceName}</span>
+            via{" "}
+            {preview ? (
+              <span className="font-semibold text-slate-700">{sourceName}</span>
+            ) : (
+              <a
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Read the original on ${sourceName}`}
+                className="font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-emerald-800 hover:decoration-emerald-400"
+              >
+                {sourceName}
+              </a>
+            )}
             <span aria-hidden> · </span>
             {formatReadingTime(readingMinutes)}
           </p>

@@ -11,12 +11,13 @@ export interface CliArgs {
   delay?: number;
   dryRun: boolean;
   noAi: boolean;
+  images: boolean;
   help: boolean;
 }
 
-/** Parses --max N, --delay MS, --no-ai, --dry-run, --help (also --max=N / --delay=MS). */
-export function parseArgs(argv: string[], allowed: ("max" | "delay" | "no-ai")[]): CliArgs {
-  const args: CliArgs = { dryRun: false, noAi: false, help: false };
+/** Parses --max N, --delay MS, --no-ai, --images, --dry-run, --help (also --max=N / --delay=MS). */
+export function parseArgs(argv: string[], allowed: ("max" | "delay" | "no-ai" | "images")[]): CliArgs {
+  const args: CliArgs = { dryRun: false, noAi: false, images: false, help: false };
 
   const readNumber = (flag: "max" | "delay", raw: string | undefined, min: number) => {
     const value = Number(raw);
@@ -31,6 +32,7 @@ export function parseArgs(argv: string[], allowed: ("max" | "delay" | "no-ai")[]
     if (flag === "--dry-run") args.dryRun = true;
     else if (flag === "--help" || flag === "-h") args.help = true;
     else if (flag === "--no-ai" && allowed.includes("no-ai")) args.noAi = true;
+    else if (flag === "--images" && allowed.includes("images")) args.images = true;
     else if (flag === "--max" && allowed.includes("max")) args.max = readNumber("max", inline ?? argv[++i], 1);
     else if (flag === "--delay" && allowed.includes("delay")) args.delay = readNumber("delay", inline ?? argv[++i], 0);
     else throw new Error(`Unknown argument: ${argv[i]}`);

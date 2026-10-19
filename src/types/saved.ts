@@ -11,6 +11,8 @@ export interface SavedArticleSnapshot {
   why_it_matters: string | null;
   description: string | null;
   image_url: string | null;
+  image_credit_name?: string | null;
+  image_credit_url?: string | null;
   published_at: string;
   sourceName: string;
   categoryName: string;
@@ -29,6 +31,8 @@ export function articleToSnapshot(article: ArticleWithRelations): SavedArticleSn
     why_it_matters: article.why_it_matters,
     description: article.description,
     image_url: article.image_url,
+    image_credit_name: article.image_credit_name ?? null,
+    image_credit_url: article.image_credit_url ?? null,
     published_at: article.published_at,
     sourceName: article.source?.name ?? "Source",
     categoryName: article.category?.name ?? "Finance",
@@ -49,6 +53,8 @@ export function snapshotToArticle(snapshot: SavedArticleSnapshot): ArticleWithRe
     why_it_matters: snapshot.why_it_matters,
     key_terms: snapshot.key_terms ?? null,
     image_url: snapshot.image_url,
+    image_credit_name: snapshot.image_credit_name ?? null,
+    image_credit_url: snapshot.image_credit_url ?? null,
     category_id: null,
     source_id: null,
     published_at: snapshot.published_at,

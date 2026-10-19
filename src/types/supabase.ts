@@ -55,6 +55,8 @@ export interface Database {
           why_it_matters: string | null;
           key_terms: { term: string; explanation: string }[] | null;
           image_url: string | null;
+          image_credit_name: string | null;
+          image_credit_url: string | null;
           category_id: string | null;
           source_id: string | null;
           published_at: string;
@@ -71,6 +73,8 @@ export interface Database {
           why_it_matters?: string | null;
           key_terms?: { term: string; explanation: string }[] | null;
           image_url?: string | null;
+          image_credit_name?: string | null;
+          image_credit_url?: string | null;
           category_id?: string | null;
           source_id?: string | null;
           published_at: string;

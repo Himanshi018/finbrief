@@ -13,6 +13,7 @@ import {
   RSS_MAX_AGE_HOURS,
   type RssFeed,
 } from "@/lib/rss/feeds";
+import { resizeKnownCdn } from "@/lib/images/og-image";
 import { extractDomain, hashString } from "@/lib/utils/cn";
 
 const RSS_USER_AGENT = "FinBrief/1.0";
@@ -23,6 +24,7 @@ interface RssItem {
   link: string | null;
   description: string | null;
   pubDate: string | null;
+  imageUrl: string | null;
 }
 
 /** Inner text of the first <name>...</name>, with CDATA unwrapped. */
@@ -32,14 +34,46 @@ function readTag(xml: string, name: string): string | null {
   return match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim() || null;
 }
 
+/** Value of attribute `name` in a single tag's source, e.g. url="..." in <enclosure ...>. */
+function readAttr(tag: string, name: string): string | null {
+  return tag.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1] ?? null;
+}
+
+const decodeUrl = (url: string) => url.replace(/&amp;/gi, "&").trim();
+
+/**
+ * Thumbnail from <media:content> / <media:thumbnail>, <enclosure type="image/*">,
+ * or else the first <img> in the description (sometimes entity-escaped).
+ */
+function readImage(body: string, description: string | null): string | null {
+  const candidates: (string | null)[] = [];
+  for (const [tag] of body.matchAll(/<media:(?:content|thumbnail)\b[^>]*>/gi)) {
+    const medium = readAttr(tag, "medium") ?? readAttr(tag, "type");
+    if (!medium || /^image/i.test(medium)) candidates.push(readAttr(tag, "url"));
+  }
+  for (const [tag] of body.matchAll(/<enclosure\b[^>]*>/gi)) {
+    if (/^image\//i.test(readAttr(tag, "type") ?? "")) candidates.push(readAttr(tag, "url"));
+  }
+  const html = description?.replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"');
+  const img = html?.match(/<img\b[^>]*>/i)?.[0];
+  if (img) candidates.push(readAttr(img, "src"));
+
+  const url = candidates.map((c) => c && decodeUrl(c)).find((c) => c && /^https?:\/\//i.test(c));
+  return url ? resizeKnownCdn(url) : null;
+}
+
 /** RSS 2.0 <item>s (all the configured feeds are RSS 2.0). */
 function parseItems(xml: string): RssItem[] {
-  return [...xml.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].map(([, body]) => ({
-    title: readTag(body, "title"),
-    link: readTag(body, "link") ?? readTag(body, "guid"),
-    description: readTag(body, "description"),
-    pubDate: readTag(body, "pubDate"),
-  }));
+  return [...xml.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].map(([, body]) => {
+    const description = readTag(body, "description");
+    return {
+      title: readTag(body, "title"),
+      link: readTag(body, "link") ?? readTag(body, "guid"),
+      description,
+      pubDate: readTag(body, "pubDate"),
+      imageUrl: readImage(body, description),
+    };
+  });
 }
 
 /** First sentences up to `max` chars, cut on a word boundary: a teaser, not the article. */
@@ -69,8 +103,8 @@ async function fetchFeed(feed: RssFeed): Promise<RssItem[]> {
 /**
  * One category's RSS feeds, mapped to the same RawNewsItem shape and run
  * through the same evaluateArticle filter as NewsAPI. Only the title, a short
- * description, the source name and the link are kept (plus the publish time
- * for ordering); no images and never the article body.
+ * description, the source name, the link and the feed's thumbnail URL are kept
+ * (plus the publish time for ordering); never the article body.
  */
 export async function fetchCategoryRss(
   categorySlug: CategorySlug,
@@ -125,7 +159,7 @@ export async function fetchCategoryRss(
         title,
         url,
         description,
-        imageUrl: null,
+        imageUrl: entry.imageUrl,
         publishedAt: published.toISOString(),
         sourceName: feed.sourceName,
         sourceDomain,
