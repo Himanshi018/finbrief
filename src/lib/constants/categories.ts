@@ -2,6 +2,8 @@ import type { CategorySlug } from "@/types/database";
 
 export const APP_NAME = "FinBrief";
 export const APP_TAGLINE = "Finance news explained simply.";
+/** Feedback form opened from the header and article pages; links are hidden when unset. */
+export const FEEDBACK_URL = process.env.NEXT_PUBLIC_FEEDBACK_URL?.trim() || null;
 
 // NewsAPI query syntax: quoted phrases, AND / OR, parentheses; 500 chars max.
 // Indian terms are included so India coverage shows up in every relevant category.

@@ -9,7 +9,7 @@ import { ArticleImage } from "@/components/article/ArticleImage";
 import { getArticleById, listRelatedArticles } from "@/services/articles.service";
 import { formatPublishedDate } from "@/lib/utils/date";
 import { getSiteUrl } from "@/lib/seo/site-url";
-import { APP_NAME } from "@/lib/constants/categories";
+import { APP_NAME, FEEDBACK_URL } from "@/lib/constants/categories";
 import { extractDomain } from "@/lib/utils/cn";
 import type { KeyTerm } from "@/types/database";
 
@@ -28,6 +28,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title: `${title} · ${APP_NAME}`,
       description,
+      type: "article",
+      url: `/articles/${article.id}`,
+      siteName: APP_NAME,
+      publishedTime: article.published_at,
       images: article.image_url ? [{ url: article.image_url }] : [],
     },
     twitter: {
@@ -257,6 +261,20 @@ export default async function ArticlePage({ params }: Props) {
               ))}
             </div>
           </section>
+        ) : null}
+
+        {FEEDBACK_URL ? (
+          <p className="mt-10 text-center text-sm text-slate-500">
+            Spotted a mistake or have an idea?{" "}
+            <a
+              href={FEEDBACK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 hover:decoration-emerald-600"
+            >
+              Send feedback
+            </a>
+          </p>
         ) : null}
       </div>
     </main>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { APP_NAME, APP_TAGLINE } from "@/lib/constants/categories";
+import { APP_NAME, APP_TAGLINE, FEEDBACK_URL } from "@/lib/constants/categories";
 import { cn } from "@/lib/utils/cn";
 import { useSavedArticles } from "@/context/SavedArticlesContext";
 
@@ -64,6 +64,16 @@ export function SiteHeader({ className }: SiteHeaderProps) {
               ) : null}
             </span>
           </Link>
+          {FEEDBACK_URL ? (
+            <a
+              href={FEEDBACK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={navLinkClass(false)}
+            >
+              Feedback
+            </a>
+          ) : null}
         </nav>
       </div>
     </header>

@@ -5,6 +5,11 @@ import {
   runNewsIngestion,
 } from "@/services/ingest.service";
 
+/** Vercel Hobby: crons run once a day and functions are capped at 60s. */
+export const maxDuration = 60;
+/** Small batch so one run finishes inside maxDuration (each article costs AI + image lookups). */
+const CRON_MAX_ARTICLES = 10;
+
 export async function GET(request: NextRequest) {
   const auth = authorizeIngest(request);
   if (!auth.ok) {
@@ -12,7 +17,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await runNewsIngestion({ maxArticles: 25 });
+    const result = await runNewsIngestion({ maxArticles: CRON_MAX_ARTICLES });
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     if (err instanceof IngestionInProgressError) {

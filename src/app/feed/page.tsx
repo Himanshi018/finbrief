@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { NewsFeed } from "@/components/feed/NewsFeed";
 import { listArticles } from "@/services/articles.service";
-import { APP_TAGLINE } from "@/lib/constants/categories";
+import { APP_NAME, APP_TAGLINE } from "@/lib/constants/categories";
 
 export const metadata: Metadata = {
   title: "Feed",
@@ -10,6 +10,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Today's finance brief",
     description: `Scroll FinBrief for quick, beginner-friendly finance stories. ${APP_TAGLINE}`,
+    type: "website",
+    url: "/feed",
+    siteName: APP_NAME,
   },
 };
 

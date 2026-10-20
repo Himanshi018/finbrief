@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { APP_NAME, APP_TAGLINE } from "@/lib/constants/categories";
@@ -61,6 +62,7 @@ export default function RootLayout({
     <html lang="en" className={`${dmSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <AppProviders>{children}</AppProviders>
+        <Analytics />
       </body>
     </html>
   );
